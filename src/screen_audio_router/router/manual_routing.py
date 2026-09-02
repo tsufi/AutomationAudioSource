@@ -39,11 +39,12 @@ class ManualRoutingController:
         store: ConfigurationStore,
         backend: AudioBackend,
         engine: RouterEngine | None = None,
+        execution_lock=None,
     ) -> None:
         self.config = config
         self.store = store
         self.engine = engine or RouterEngine()
-        self.executor = RouteExecutor(backend)
+        self.executor = RouteExecutor(backend, execution_lock)
 
     def change_mode(
         self,

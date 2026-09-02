@@ -180,7 +180,8 @@ class ApplicationRegistry:
                     results[stream_id] = MatchResult(
                         None,
                         MatchConfidence.UNMATCHED,
-                        f"ambiguous configured alias: {len(alias_candidates)} candidate streams",
+                        f"ambiguous configured alias for {app_id}: "
+                        f"{len(alias_candidates)} candidate streams",
                         75,
                     )
 

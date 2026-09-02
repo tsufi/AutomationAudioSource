@@ -43,10 +43,14 @@ class DesktopApplication(QObject):
         self.window.application_count_changed.connect(self.tray.set_application_count)
         self.app.aboutToQuit.connect(self.stop_services)
 
-    def start(self) -> bool:
-        self.window.show()
+    def start(self, *, autostart: bool = False) -> bool:
         self.tray.show()
-        return self.window.start_runtime()
+        started = self.window.start_runtime()
+        if not autostart or not self.tray.available or not started:
+            self.window.show()
+        else:
+            self.window.hide()
+        return started
 
     def show_window(self) -> None:
         self.window.showNormal()
@@ -70,6 +74,9 @@ class DesktopApplication(QObject):
         self.shutdown()
 
     def stop_services(self) -> None:
+        automatic = getattr(self.window, "automatic_routing_service", None)
+        if automatic is not None:
+            automatic.stop()
         self.window.routing_service.stop()
         self.window.runtime.stop()
 

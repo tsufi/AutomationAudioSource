@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+
 from PySide6.QtCore import QItemSelection, Qt, Signal
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
@@ -19,14 +21,23 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from screen_audio_router.autostart import AutostartManager, AutostartState
 from screen_audio_router.config import AppConfig, ConfigurationStore
 from screen_audio_router.config.resolver import RoutingConfigResolver
 from screen_audio_router.config.schema import RoutingMode
+from screen_audio_router.diagnostics import (
+    DiagnosticCategory,
+    DiagnosticEventHistory,
+    DiagnosticSeverity,
+    build_diagnostic_snapshot,
+)
 from screen_audio_router.gui.application_list import (
     ApplicationTableModel,
     ApplicationViewModel,
     RoutingModeDelegate,
 )
+from screen_audio_router.gui.automatic_routing import AutomaticRoutingService
+from screen_audio_router.gui.diagnostics import DiagnosticsDialog
 from screen_audio_router.gui.manual_routing import ManualRoutingService
 from screen_audio_router.gui.runtime import GuiRuntime
 from screen_audio_router.router.manual_routing import (
@@ -48,25 +59,42 @@ class MainWindow(QMainWindow):
         store: ConfigurationStore | None = None,
         runtime: GuiRuntime | None = None,
         routing_service: ManualRoutingService | None = None,
+        autostart_manager: AutostartManager | None = None,
+        automatic_routing_service: AutomaticRoutingService | None = None,
     ) -> None:
         super().__init__()
+        self.diagnostic_history = DiagnosticEventHistory()
         self.store = store or ConfigurationStore()
+        self.autostart_manager = autostart_manager or AutostartManager()
         self.view_model = ApplicationViewModel(config, self.store)
         self.model = ApplicationTableModel(self.view_model, self)
         resolver = RoutingConfigResolver(config)
         self.runtime = runtime or GuiRuntime(
             ApplicationMatcher(resolver.matcher_aliases()), config.settings.poll_interval_ms, self
         )
+        execution_lock = threading.RLock()
         self.routing_service = routing_service or ManualRoutingService(
-            ManualRoutingController(config, self.store, self.runtime.backend), self
+            ManualRoutingController(
+                config, self.store, self.runtime.backend, execution_lock=execution_lock
+            ),
+            self,
+        )
+        self.automatic_routing_service = automatic_routing_service or AutomaticRoutingService(
+            config, self.runtime.backend, execution_lock, self
         )
         self.setWindowTitle("Screen Audio Router")
         self.resize(1040, 620)
         self.enabled_checkbox = QCheckBox("Router enabled")
         self.enabled_checkbox.setChecked(config.enabled)
         self.enabled_checkbox.setToolTip(
-            "Controls routing decisions. Audio moves only after a direct user action."
+            "Master switch for continuous AUTO routing and explicit routing actions."
         )
+        self.diagnostics_button = QPushButton("Diagnostics")
+        self.autostart_checkbox = QCheckBox("Start automatically at login")
+        autostart_status = self.autostart_manager.status()
+        self.autostart_checkbox.setChecked(autostart_status.enabled)
+        self.autostart_checkbox.setEnabled(autostart_status.state is not AutostartState.ERROR)
+        self.autostart_checkbox.setToolTip(autostart_status.message)
         self.table = QTableView()
         self.table.setModel(self.model)
         self.table.setItemDelegateForColumn(3, RoutingModeDelegate(self.table))
@@ -127,6 +155,8 @@ class MainWindow(QMainWindow):
         container = QWidget()
         layout = QVBoxLayout(container)
         layout.addWidget(self.enabled_checkbox)
+        layout.addWidget(self.autostart_checkbox)
+        layout.addWidget(self.diagnostics_button)
         layout.addWidget(self.empty_state)
         layout.addWidget(self.table, 1)
         layout.addWidget(details)
@@ -134,6 +164,8 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Waiting for live KWin and audio data…")
 
         self.enabled_checkbox.toggled.connect(self._enabled_changed)
+        self.autostart_checkbox.toggled.connect(self._autostart_changed)
+        self.diagnostics_button.clicked.connect(self.show_diagnostics)
         self.fixed_output.currentIndexChanged.connect(self._fixed_output_changed)
         self.apply_button.clicked.connect(self._apply_now)
         self.reset_button.clicked.connect(self._reset_configuration)
@@ -142,14 +174,24 @@ class MainWindow(QMainWindow):
         self.model.modelReset.connect(self._restore_selection)
         self.model.mode_requested.connect(self._mode_requested)
         self.runtime.snapshot_changed.connect(self._snapshot_changed)
+        runtime_ready = getattr(self.runtime, "ready", None)
+        if runtime_ready is not None:
+            runtime_ready.connect(self.automatic_routing_service.controller.mark_ready)
         self.runtime.error_occurred.connect(self._show_error)
+        self.automatic_routing_service.event_received.connect(self._automatic_routing_event)
+        self.automatic_routing_service.refresh_requested.connect(self.runtime.refresh_audio)
         self.routing_service.completed.connect(self._routing_completed)
         self.routing_service.failed.connect(self._routing_failed)
         self.routing_service.busy_changed.connect(self._routing_busy_changed)
         self._seen_application_ids: set[str] = set()
         self._lifecycle_managed = False
         self._tray_available = False
-
+        self.diagnostics_dialog = DiagnosticsDialog(self._diagnostic_snapshot, self)
+        self._diagnostic_app_ids: set[str] = set()
+        self._diagnostic_stream_ids: set[str] = set()
+        self._diagnostic_output_ids: set[str] = set()
+        self._diagnostic_displays: dict[str, str | None] = {}
+        self._manual_application_id: str | None = None
     def start_runtime(self) -> bool:
         try:
             self.runtime.start()
@@ -169,6 +211,7 @@ class MainWindow(QMainWindow):
             self.close_quit_requested.emit()
             return
         self.routing_service.stop()
+        self.automatic_routing_service.stop()
         self.runtime.stop()
         event.accept()
 
@@ -180,6 +223,10 @@ class MainWindow(QMainWindow):
         self.enabled_checkbox.setChecked(enabled)
 
     def _snapshot_changed(self, entries, outputs) -> None:
+        registry = getattr(self.runtime, "registry", None)
+        self.automatic_routing_service.controller.update_snapshot(
+            tuple(entries), tuple(outputs), tuple(getattr(registry, "unmatched_streams", ()))
+        )
         selected_id = self._selected_application_id()
         new_ids = [
             entry.application_id
@@ -188,6 +235,7 @@ class MainWindow(QMainWindow):
             and not self.view_model.config.has_application_rule(entry.application_id)
         ]
         self._seen_application_ids.update(entry.application_id for entry in entries)
+        self._record_snapshot_events(entries, outputs)
         self.model.update_snapshot(entries, outputs)
         self.application_count_changed.emit(len(entries))
         self.empty_state.setVisible(not entries)
@@ -201,11 +249,15 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(
                 f"Live: {len(entries)} applications, {len(outputs)} audio outputs"
             )
+        if self.diagnostics_dialog.isVisible():
+            self.diagnostics_dialog.refresh()
 
     def _enabled_changed(self, enabled: bool) -> None:
+        self.automatic_routing_service.controller.configuration_changed()
         try:
             self.routing_service.controller.set_enabled(enabled)
         except OSError as exc:
+            self._record_error(DiagnosticCategory.CONFIG, str(exc))
             self.enabled_checkbox.blockSignals(True)
             self.enabled_checkbox.setChecked(not enabled)
             self.enabled_checkbox.blockSignals(False)
@@ -213,34 +265,102 @@ class MainWindow(QMainWindow):
             return
         self.model.refresh()
         self.router_enabled_changed.emit(enabled)
+        self.diagnostic_history.add(
+            DiagnosticCategory.CONFIG,
+            f"Router {'enabled' if enabled else 'disabled'} by user",
+        )
+
+    def _autostart_changed(self, enabled: bool) -> None:
+        try:
+            status = (
+                self.autostart_manager.enable() if enabled else self.autostart_manager.disable()
+            )
+        except OSError as exc:
+            actual = self.autostart_manager.status()
+            self.autostart_checkbox.blockSignals(True)
+            self.autostart_checkbox.setChecked(actual.enabled)
+            self.autostart_checkbox.blockSignals(False)
+            self.autostart_checkbox.setToolTip(str(exc))
+            self.diagnostic_history.add(
+                DiagnosticCategory.CONFIG,
+                f"Autostart operation failed: {exc}",
+                severity=DiagnosticSeverity.ERROR,
+            )
+            self._show_error(f"Could not update autostart: {exc}")
+            return
+        self.autostart_checkbox.setToolTip(status.message)
+        self.diagnostic_history.add(
+            DiagnosticCategory.CONFIG,
+            f"Autostart {'enabled' if status.enabled else 'disabled'}",
+        )
+        self.statusBar().showMessage(status.message)
 
     def _fixed_output_changed(self, index: int) -> None:
         row = self._selected_row()
         output_id = self.fixed_output.itemData(index)
         if row is None or output_id is None:
             return
-        self.routing_service.select_fixed_output(
+        self._begin_manual_routing(row.application.application_id)
+        self.diagnostic_history.add(
+            DiagnosticCategory.ROUTING,
+            f"Manual fixed-output route requested for {row.application.display_name}",
+            application_id=row.application.application_id,
+        )
+        accepted = self.routing_service.select_fixed_output(
             row.application, self.view_model.outputs, str(output_id)
         )
+        if not accepted:
+            self._end_rejected_manual_routing(row.application.application_id)
 
     def _mode_requested(self, application_id: str, mode: RoutingMode) -> None:
         row = self._row_for_application(application_id)
         if row is not None:
-            self.routing_service.change_mode(row.application, self.view_model.outputs, mode)
+            self._begin_manual_routing(application_id)
+            self.diagnostic_history.add(
+                DiagnosticCategory.ROUTING,
+                f"Routing mode {mode.value} requested for {row.application.display_name}",
+                application_id=application_id,
+            )
+            accepted = self.routing_service.change_mode(
+                row.application, self.view_model.outputs, mode
+            )
+            if not accepted:
+                self._end_rejected_manual_routing(application_id)
 
     def _apply_now(self) -> None:
         row = self._selected_row()
         if row is not None:
-            self.routing_service.apply_now(row.application, self.view_model.outputs)
+            self._begin_manual_routing(row.application.application_id)
+            self.diagnostic_history.add(
+                DiagnosticCategory.ROUTING,
+                f"Apply Now requested for {row.application.display_name}",
+                application_id=row.application.application_id,
+            )
+            accepted = self.routing_service.apply_now(row.application, self.view_model.outputs)
+            if not accepted:
+                self._end_rejected_manual_routing(row.application.application_id)
 
     def _reset_configuration(self) -> None:
         row = self._selected_row()
         if row is not None and row.is_configured:
-            self.routing_service.reset_configuration(
+            self._begin_manual_routing(row.application.application_id)
+            accepted = self.routing_service.reset_configuration(
                 row.application, self.view_model.outputs
             )
+            if not accepted:
+                self._end_rejected_manual_routing(row.application.application_id)
 
     def _routing_completed(self, result: RoutingOperationResult) -> None:
+        self.automatic_routing_service.controller.end_manual(result.application_id)
+        self._manual_application_id = None
+        severity = DiagnosticSeverity.INFO if result.success else DiagnosticSeverity.WARNING
+        self.diagnostic_history.add(
+            DiagnosticCategory.ROUTING,
+            result.message,
+            severity=severity,
+            application_id=result.application_id,
+            details=(f"moved={len(result.streams_moved)} failed={len(result.streams_failed)}"),
+        )
         self.operation_message.setText(result.message)
         self.statusBar().showMessage(result.message)
         self.model.refresh()
@@ -248,8 +368,60 @@ class MainWindow(QMainWindow):
         self.runtime.refresh_audio()
 
     def _routing_failed(self, message: str) -> None:
+        if self._manual_application_id is not None:
+            self.automatic_routing_service.controller.end_manual(self._manual_application_id)
+            self._manual_application_id = None
+        self._record_error(DiagnosticCategory.ROUTING, message)
         self.operation_message.setText(f"Routing failed: {message}")
         self._show_error(message)
+
+    def _begin_manual_routing(self, application_id: str) -> None:
+        self._manual_application_id = application_id
+        self.automatic_routing_service.controller.begin_manual(application_id)
+
+    def _end_rejected_manual_routing(self, application_id: str) -> None:
+        self.automatic_routing_service.controller.end_manual(application_id)
+        self._manual_application_id = None
+
+    def _automatic_routing_event(self, event) -> None:
+        severity = (
+            DiagnosticSeverity.ERROR
+            if event.kind == "failure"
+            else DiagnosticSeverity.WARNING
+            if event.kind in {"partial_failure", "stale"}
+            else DiagnosticSeverity.INFO
+        )
+        details_parts = []
+        if event.decision is not None:
+            details_parts.extend(
+                (
+                    f"current={','.join(event.decision.current_outputs) or 'none'}",
+                    f"desired={event.decision.desired_output or 'none'}",
+                    f"attempted={','.join(event.decision.stream_ids) or 'none'}",
+                    f"reason={event.decision.reason.value}",
+                )
+            )
+        if event.execution is not None:
+            succeeded = [item.stream_id for item in event.execution.streams if item.succeeded]
+            failed = [item.stream_id for item in event.execution.streams if not item.succeeded]
+            errors = [item.error for item in event.execution.streams if item.error]
+            details_parts.extend(
+                (
+                    f"succeeded={','.join(succeeded) or 'none'}",
+                    f"failed={','.join(failed) or 'none'}",
+                )
+            )
+            if errors:
+                details_parts.append(f"errors={' | '.join(errors)}")
+        self.diagnostic_history.add(
+            DiagnosticCategory.ROUTING,
+            event.message,
+            severity=severity,
+            application_id=event.application_id,
+            details=" ".join(details_parts) or None,
+        )
+        if event.kind in {"success", "partial_failure", "failure"}:
+            self.statusBar().showMessage(event.message)
 
     def _routing_busy_changed(self, busy: bool) -> None:
         self.table.setEnabled(not busy)
@@ -364,9 +536,89 @@ class MainWindow(QMainWindow):
         self._restore_selection()
 
     def _show_error(self, message: str, *, dialog: bool = False) -> None:
+        self._record_error(DiagnosticCategory.RUNTIME, message)
         self.statusBar().showMessage(f"Error: {message}")
         if dialog:
             QMessageBox.critical(self, "Screen Audio Router", message)
+
+    def show_diagnostics(self) -> None:
+        self.diagnostics_dialog.show_and_refresh()
+
+    def _diagnostic_snapshot(self):
+        registry = getattr(self.runtime, "registry", None)
+        unmatched = tuple(getattr(registry, "unmatched_streams", ()))
+        kwin = getattr(self.runtime, "kwin", None)
+        windows = None
+        if kwin is not None:
+            windows = tuple(kwin.windows(include_all=True))
+        path = getattr(self.store, "path", "In-memory/test configuration")
+        started = bool(getattr(self.runtime, "_started", True))
+        audio_error = getattr(self.runtime, "audio_error", None)
+        kwin_error = getattr(self.runtime, "kwin_error", None)
+        return build_diagnostic_snapshot(
+            self.view_model.config,
+            self.view_model.entries,
+            self.view_model.outputs,
+            unmatched,
+            windows=windows,
+            events=self.diagnostic_history.events,
+            configuration_path=path,
+            audio_backend_health=f"Error: {audio_error}" if audio_error else "Available",
+            kwin_health=f"Error: {kwin_error}" if kwin_error else "Connected",
+            dbus_health="Owned" if started else "Not owned",
+            autostart_health=self.autostart_manager.status().state.value.title(),
+        )
+
+    def _record_snapshot_events(self, entries, outputs) -> None:
+        app_ids = {entry.application_id for entry in entries}
+        stream_ids = {matched.stream.stream_id for entry in entries for matched in entry.streams}
+        registry = getattr(self.runtime, "registry", None)
+        stream_ids.update(
+            item.stream.stream_id for item in getattr(registry, "unmatched_streams", ())
+        )
+        output_ids = {output.id for output in outputs}
+        displays = {entry.application_id: entry.current_display for entry in entries}
+        for app_id in sorted(app_ids - self._diagnostic_app_ids):
+            self.diagnostic_history.add(
+                DiagnosticCategory.RUNTIME,
+                f"Application discovered: {app_id}",
+                application_id=app_id,
+            )
+        for stream_id in sorted(stream_ids - self._diagnostic_stream_ids):
+            self.diagnostic_history.add(
+                DiagnosticCategory.AUDIO, f"Audio stream appeared: {stream_id}"
+            )
+        for stream_id in sorted(self._diagnostic_stream_ids - stream_ids):
+            self.diagnostic_history.add(
+                DiagnosticCategory.AUDIO, f"Audio stream disappeared: {stream_id}"
+            )
+        for output_id in sorted(output_ids - self._diagnostic_output_ids):
+            self.diagnostic_history.add(
+                DiagnosticCategory.AUDIO, f"Audio output appeared: {output_id}"
+            )
+        for output_id in sorted(self._diagnostic_output_ids - output_ids):
+            self.diagnostic_history.add(
+                DiagnosticCategory.AUDIO,
+                f"Audio output disappeared: {output_id}",
+                severity=DiagnosticSeverity.WARNING,
+            )
+        for app_id in sorted(app_ids & self._diagnostic_app_ids):
+            previous = self._diagnostic_displays.get(app_id)
+            current = displays.get(app_id)
+            if previous != current:
+                self.diagnostic_history.add(
+                    DiagnosticCategory.KWIN,
+                    f"Controlling display changed: {previous or 'No Window'} -> "
+                    f"{current or 'No Window'}",
+                    application_id=app_id,
+                )
+        self._diagnostic_app_ids = app_ids
+        self._diagnostic_stream_ids = stream_ids
+        self._diagnostic_output_ids = output_ids
+        self._diagnostic_displays = displays
+
+    def _record_error(self, category: DiagnosticCategory, message: str) -> None:
+        self.diagnostic_history.add(category, message, severity=DiagnosticSeverity.ERROR)
 
 
 def configuration_error_message(error: Exception) -> str:

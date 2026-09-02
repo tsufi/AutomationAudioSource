@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from contextlib import nullcontext
 
 from screen_audio_router.audio.backend import AudioBackend, AudioBackendError
-from screen_audio_router.audio.models import AudioOutput
+from screen_audio_router.audio.models import AudioOutput, Availability
 from screen_audio_router.config.schema import RoutingMode
 from screen_audio_router.router.application_registry import ApplicationEntry
 from screen_audio_router.router.decisions import (
@@ -77,7 +78,11 @@ class RouterEngine:
                 details=f"unsupported routing mode: {rule.mode}",
             )
 
-        output_ids = {output.id for output in available_outputs}
+        output_ids = {
+            output.id
+            for output in available_outputs
+            if output.availability is not Availability.UNAVAILABLE
+        }
         if desired_output not in output_ids:
             return RouteDecision(
                 **base,
@@ -121,18 +126,21 @@ class RouterEngine:
 class RouteExecutor:
     """Executes only a caller-supplied MOVE decision; it contains no policy."""
 
-    def __init__(self, backend: AudioBackend) -> None:
+    def __init__(self, backend: AudioBackend, execution_lock=None) -> None:
         self.backend = backend
+        self.execution_lock = execution_lock
 
     def execute(self, decision: RouteDecision) -> RouteExecutionResult:
         if decision.action is not RouteAction.MOVE or not decision.desired_output:
             return RouteExecutionResult(decision, ())
         results: list[StreamExecutionResult] = []
-        for stream_id in decision.stream_ids:
-            try:
-                self.backend.move_stream(stream_id, decision.desired_output)
-            except AudioBackendError as exc:
-                results.append(StreamExecutionResult(stream_id, False, str(exc)))
-                continue
-            results.append(StreamExecutionResult(stream_id, True))
+        context = self.execution_lock if self.execution_lock is not None else nullcontext()
+        with context:
+            for stream_id in decision.stream_ids:
+                try:
+                    self.backend.move_stream(stream_id, decision.desired_output)
+                except AudioBackendError as exc:
+                    results.append(StreamExecutionResult(stream_id, False, str(exc)))
+                    continue
+                results.append(StreamExecutionResult(stream_id, True))
         return RouteExecutionResult(decision, tuple(results))

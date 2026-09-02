@@ -1532,6 +1532,16 @@ Implement:
     routing history
     errors
 
+Implemented Phase 11 behavior: a typed read-only diagnostic snapshot is built from
+the existing runtime registry, KWin state, audio outputs/streams, persisted config,
+and centrally produced `RouteDecision` objects. A reusable tabbed diagnostics dialog
+shows health overview, applications and routing explanations, output/stream matching,
+KWin windows, display mappings, configuration counts, and a timezone-aware bounded
+session event history (`maxlen=200`). Explicit routing results and runtime/config/DBus
+errors feed the history. Copy Diagnostics produces a sanitized plain-text clipboard
+report with URL query data and common secret fields redacted. Diagnostics starts no
+poller, claims no DBus service, writes no configuration, and executes no routing.
+
 ---
 
 ## Phase 12 - Autostart
@@ -1540,13 +1550,41 @@ Implement user-session startup.
 
 Application/router survives GUI closing where intended.
 
+Implemented Phase 12 behavior: typed `AutostartManager` state is derived from one
+managed freedesktop user entry under `$XDG_CONFIG_HOME/autostart/` (or
+`~/.config/autostart/`). Enable uses an atomic same-directory write and validates a
+stable managed marker and direct `screen-audio-router --autostart` Exec; disable is
+idempotent and removes only that managed entry. Unrelated target content is rejected.
+The main-window checkbox reflects filesystem state and reports failures through the
+existing UI and diagnostic event history without changing router-enabled state.
+Autostart launches runtime quietly in the tray, while manual or no-tray launches show
+the window. Startup never executes routing. No systemd service or root access is used.
+
 ---
 
-## Phase 13 - Migration
+## Phase 13 - Continuous AUTO Runtime Routing
 
-Test and replace old Plezy automation.
+The earlier migration phase is obsolete because the standalone Plezy automation
+was intentionally removed before this phase and must not be recreated.
 
-Only disable old solution after success.
+Implemented Phase 13 behavior: a dedicated `AutomaticRoutingController` consumes
+reconciled registry/audio snapshots, waits for initial KWin and audio readiness,
+and performs one controlled startup reconciliation. It then coalesces relevant
+changes per configured AUTO application with a 250 ms debounce, asks
+`RouterEngine` for fresh policy, and executes only `MOVE` decisions off the Qt
+thread. Generations invalidate queued work after application/config/global changes;
+mode, controlling display, destination availability, and matched stream membership
+are revalidated immediately before execution. A shared execution lock serializes
+automatic and manual backend moves.
+
+Unknown/unconfigured, IGNORE, FIXED_DEVICE, unmapped, missing-output, ambiguous,
+and unmatched states never execute automatically. Successful movement relies on
+the next audio snapshot becoming `ALREADY_CORRECT`, preventing loops; failures wait
+for a meaningful later event rather than retrying aggressively. Automatic results
+are recorded in the existing bounded diagnostic history, remain active while tray
+hidden or autostarted, obey Router Enabled, and shut down before runtime workers.
+No display-mapping UI, default-sink change, card-profile guessing, or Phase 14
+feature is included.
 
 ---
 

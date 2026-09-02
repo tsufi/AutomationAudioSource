@@ -6,20 +6,21 @@ application's controlling window. It is designed for PipeWire through its
 PulseAudio compatibility layer and never needs to change the global default sink
 for normal routing.
 
-The project is currently at **Phase 10: System Tray and Desktop Lifecycle**. It can inspect the local
+The project is currently at **Phase 13: Continuous AUTO Runtime Routing**. It can inspect the local
 PipeWire/PulseAudio-compatible server and perform an explicitly requested stream
 move through a reusable backend. A separate KWin 6 script reports live Wayland
 window facts over user-session DBus. An in-process registry groups windows by
-stable application identity and conservatively associates audio streams. It does
-not perform continuous automatic routing. The native Qt window shows live application,
+stable application identity and conservatively associates audio streams. It now
+continuously routes explicitly configured `AUTO` applications after initial runtime
+readiness. The native Qt window shows live application,
 screen, audio-output, routing-mode, and decision status data. It persists `IGNORE`,
-`AUTO`, `FIXED_DEVICE`, fixed-output, and global enabled selections without
-executing those decisions automatically. A direct mode/device selection or
+`AUTO`, `FIXED_DEVICE`, fixed-output, and global enabled selections. Runtime
+execution applies only to configured AUTO rules. A direct mode/device selection or
 `Apply Now` action can explicitly apply the selected application's current decision.
 Newly discovered window-only and audio-only applications appear automatically with
 a subtle `NEW` marker, but remain unconfigured and resolve to the safe `IGNORE`
-mode. Discovery, startup, polling, and runtime events neither persist a rule nor
-move audio. A rule becomes persistent only after the user explicitly selects
+mode. Discovery never persists a rule or promotes an unknown application to AUTO.
+A rule becomes persistent only after the user explicitly selects
 Ignore, Auto, or a fixed device.
 
 ## Architecture
@@ -34,6 +35,8 @@ The package keeps the boundaries defined in [DESIGN.md](DESIGN.md):
   parse `pactl` or own routing policy
 - `router.manual_routing`: the single controller for user-requested persistence,
   decision evaluation, and per-stream execution
+- `router.automatic_routing`: the dedicated debounced coordinator for fresh,
+  configured AUTO decisions and serialized background execution
 - `logging`: centralized application logging configuration
 
 The removed Plezy-specific standalone automation is not recreated by this project.
@@ -68,12 +71,12 @@ service conflict.
 The application table is sorted with active applications first, then windowed and
 audio-only entries. Selecting a row shows its stable ID, controlling screen,
 current audio, decision, runtime object counts, and fixed-output choices. Missing
-saved fixed outputs remain visible as unavailable. Phase 7 statuses such as
-`Would route to …` are pending decisions. Selecting `AUTO`, selecting a fixed
+saved fixed outputs remain visible as unavailable. Statuses such as
+`Would route to …` explain current policy. Selecting `AUTO`, selecting a fixed
 device, or pressing `Apply Now` is an explicit user action and may move only the
-selected application's confidently matched streams. KWin events, application
-activation, stream polling, stream appearance, startup, and the global enabled
-toggle never execute routing in Phase 8.
+selected application's confidently matched streams. After runtime readiness,
+KWin changes, stream polling, stream appearance, and output changes also reevaluate
+configured AUTO applications without changing IGNORE or FIXED_DEVICE rules.
 
 Manual operations run on a dedicated worker and refresh the real audio backend
 afterward. Routine results appear inline and in the status bar, including partial
@@ -98,16 +101,71 @@ KWin DBus ownership, application registry, and audio discovery worker alive.
 The first close in a session shows a brief tray reminder.
 
 The tray and main-window enabled controls share the same configuration state.
-Changing either control persists the existing global setting and refreshes routing
-decisions, but does not move audio. A hidden tray runtime likewise does not enable
-continuous automatic routing: audio moves remain limited to explicit Phase 8 user
-actions.
+Disabling invalidates queued AUTO work; enabling alone does not sweep applications.
+A later relevant runtime event resumes configured AUTO routing. A hidden tray
+runtime uses exactly the same continuous policy as a visible window.
 
 `Quit` and terminal Ctrl+C use the same clean shutdown path, releasing the KWin
 DBus service, stopping polling and timers, waiting for worker executors, and removing
 the tray icon. If no system tray is available, closing the main window quits instead
-of leaving an invisible process. Login autostart is not implemented yet. Independently
+of leaving an invisible process. Independently
 launched instances may still conflict over the single KWin DBus receiver service.
+
+## Diagnostics
+
+Open `Diagnostics` from the main window for a read-only, live view built from the
+existing runtime snapshot. The Overview shows router, backend, KWin, DBus, and
+configuration health plus logical application, output, stream, and window counts.
+Additional tabs explain applications and `RouteDecision` results, audio outputs,
+stream matching confidence and reasons, unmatched/ambiguous streams, KWin windows,
+read-only display mappings, configuration counts, and recent session events.
+
+`Refresh` re-renders existing registry/runtime state; it does not create another
+audio poller or claim another DBus service. `Copy Diagnostics` puts a plain-text
+support report on the clipboard. URLs have query values removed and common secret,
+token, authorization, API-key, and password fields are redacted. The report does
+not dump environment variables or raw configuration JSON.
+
+Diagnostics never changes configuration, matching, or routing. It contains no
+route/apply/reset actions and never invokes `RouteExecutor`. Recent events are kept
+only in memory for the current session, with a maximum of 200 entries.
+
+## Start automatically at login
+
+The main window provides `Start automatically at login`. Its state comes directly
+from the managed XDG entry at
+`$XDG_CONFIG_HOME/autostart/screen-audio-router.desktop`, falling back to
+`~/.config/autostart/`. No redundant setting is stored in `config.json`, no root
+access is needed, and no systemd service is installed.
+
+Enabling writes a complete `.desktop` file atomically with the marker
+`X-ScreenAudioRouter-Managed=true` and the direct command
+`screen-audio-router --autostart`. The package console entrypoint must be available
+on the login PATH; otherwise the UI reports an error rather than creating a broken
+entry. An unrelated file at the managed path is never overwritten or removed.
+
+`--autostart` starts runtime and the tray quietly without raising the main window.
+If a tray is unavailable, runtime startup fails, or configuration cannot be loaded
+safely, the GUI/error remains visible. Manual launches continue to show the main
+window. Autostart and Router Enabled are independent. After initial KWin and audio
+state are ready, either launch mode performs one conservative reconciliation of
+configured AUTO applications and then uses the same continuous policy.
+
+## Continuous AUTO routing
+
+`AUTO` follows existing persisted display-to-output mappings while Screen Audio
+Router runs. A controlling-window display change, a confidently matched stream
+appearing, or a mapped destination reappearing can trigger reevaluation. Unmapped
+displays leave audio untouched, and missing outputs never fall back to another
+device. Unknown applications remain unconfigured `IGNORE`; runtime events do not
+execute `FIXED_DEVICE` rules.
+
+The conservative matcher remains a hard safety boundary. Ambiguous or unmatched
+streams—including indistinguishable standalone `mpv` streams—are never moved.
+Per-application events are coalesced for 250 ms, stale work is revalidated before
+execution, and backend moves are serialized with manual routing off the Qt event
+loop. Results and failures appear in diagnostics without modal dialogs. Automatic
+routing never changes the default sink or guesses a sound-card profile.
 
 The configuration is created on first run at
 `~/.config/screen-audio-router/config.json`. Override the base configuration
