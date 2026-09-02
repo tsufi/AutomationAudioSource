@@ -1,0 +1,15 @@
+[
+  {
+    "index": 327,
+    "sink": 54,
+    "client": 200,
+    "corked": false,
+    "properties": {
+      "application.name": "mpv",
+      "application.process.binary": "mpv",
+      "application.process.id": "12345",
+      "media.name": "Playback"
+    }
+  },
+  {"index": 328, "sink": 999, "properties": {}}
+]

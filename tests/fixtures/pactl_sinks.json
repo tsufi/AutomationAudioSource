@@ -1,0 +1,28 @@
+[
+  {
+    "index": 54,
+    "state": "RUNNING",
+    "name": "sink.usb",
+    "description": "USB Headset",
+    "properties": {
+      "device.name": "card.usb",
+      "device.bus": "usb"
+    },
+    "ports": [
+      {"name": "speaker", "availability": "available"}
+    ],
+    "active_port": "speaker"
+  },
+  {
+    "index": 73,
+    "state": "SUSPENDED",
+    "name": "sink.hdmi",
+    "description": "HDMI Output",
+    "properties": {"device.name": "card.pci"},
+    "ports": [
+      {"name": "hdmi", "availability": "not available"}
+    ],
+    "active_port": "hdmi"
+  },
+  {"index": 99, "description": "Missing stable name"}
+]

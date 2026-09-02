@@ -1,0 +1,7 @@
+{
+  "server_string": "/run/user/1000/pulse/native",
+  "server_name": "PulseAudio (on PipeWire 1.2.3)",
+  "server_version": "15.0.0",
+  "is_local": "yes",
+  "default_sink_name": "sink.usb"
+}

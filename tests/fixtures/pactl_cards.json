@@ -1,0 +1,13 @@
+[
+  {
+    "index": 43,
+    "name": "card.pci",
+    "properties": {"device.description": "HDMI Controller"},
+    "profiles": {
+      "off": {"description": "Off", "sinks": 0, "sources": 0, "priority": 0, "available": true},
+      "output:hdmi": {"description": "HDMI Stereo", "sinks": 1, "sources": 0, "priority": 5900, "available": true},
+      "output:missing": {"description": "Disconnected HDMI", "sinks": 1, "sources": 0, "priority": 5000, "available": false}
+    },
+    "active_profile": "output:hdmi"
+  }
+]

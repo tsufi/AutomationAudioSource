@@ -1,0 +1,89 @@
+"""Native Qt system-tray presentation for desktop lifecycle controls."""
+
+from __future__ import annotations
+
+from PySide6.QtCore import QObject, Signal
+from PySide6.QtGui import QAction, QIcon
+from PySide6.QtWidgets import QApplication, QMenu, QStyle, QSystemTrayIcon
+
+
+class SystemTrayController(QObject):
+    """Own tray widgets and emit intent without owning application policy."""
+
+    open_requested = Signal()
+    enabled_requested = Signal(bool)
+    quit_requested = Signal()
+
+    def __init__(self, enabled: bool, parent=None, *, available: bool | None = None) -> None:
+        super().__init__(parent)
+        detected = QSystemTrayIcon.isSystemTrayAvailable()
+        self.available = detected if available is None else available
+        self.tray_icon = QSystemTrayIcon(_application_icon(), self)
+        self.menu = QMenu()
+        self.title_action = self.menu.addAction("Screen Audio Router")
+        self.title_action.setEnabled(False)
+        self.menu.addSeparator()
+        self.open_action = self.menu.addAction("Open")
+        self.enabled_action = QAction("Router Enabled", self.menu)
+        self.enabled_action.setCheckable(True)
+        self.enabled_action.setChecked(enabled)
+        self.menu.addAction(self.enabled_action)
+        self.status_action = self.menu.addAction("Applications detected: 0")
+        self.status_action.setEnabled(False)
+        self.menu.addSeparator()
+        self.quit_action = self.menu.addAction("Quit")
+        self.tray_icon.setContextMenu(self.menu)
+        self.set_application_count(0)
+
+        self.open_action.triggered.connect(self.open_requested)
+        self.enabled_action.toggled.connect(self.enabled_requested)
+        self.quit_action.triggered.connect(self.quit_requested)
+        self.tray_icon.activated.connect(self._activated)
+
+    def show(self) -> None:
+        if self.available:
+            self.tray_icon.show()
+
+    def hide(self) -> None:
+        self.tray_icon.hide()
+
+    def set_enabled(self, enabled: bool) -> None:
+        self.enabled_action.blockSignals(True)
+        self.enabled_action.setChecked(enabled)
+        self.enabled_action.blockSignals(False)
+        self._update_tooltip()
+
+    def set_application_count(self, count: int) -> None:
+        self._application_count = count
+        self.status_action.setText(f"Applications detected: {count}")
+        self._update_tooltip()
+
+    def show_close_message(self) -> None:
+        if self.available:
+            self.tray_icon.showMessage(
+                "Screen Audio Router",
+                "Screen Audio Router is still running in the system tray.",
+                QSystemTrayIcon.MessageIcon.Information,
+                3000,
+            )
+
+    def _update_tooltip(self) -> None:
+        state = "enabled" if self.enabled_action.isChecked() else "disabled"
+        self.tray_icon.setToolTip(
+            f"Screen Audio Router\nRouter {state} · {self._application_count} applications"
+        )
+
+    def _activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
+        if reason in {
+            QSystemTrayIcon.ActivationReason.Trigger,
+            QSystemTrayIcon.ActivationReason.DoubleClick,
+        }:
+            self.open_requested.emit()
+
+
+def _application_icon() -> QIcon:
+    icon = QIcon.fromTheme("audio-card")
+    if not icon.isNull():
+        return icon
+    app = QApplication.instance()
+    return app.style().standardIcon(QStyle.StandardPixmap.SP_MediaVolume) if app else QIcon()
