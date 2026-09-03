@@ -36,6 +36,9 @@ class DesktopApplication(QObject):
 
         self.tray.open_requested.connect(self.show_window)
         self.tray.enabled_requested.connect(self.set_enabled)
+        self.tray.display_mappings_requested.connect(self.window.show_settings)
+        self.tray.diagnostics_requested.connect(self.window.show_diagnostics)
+        self.tray.about_requested.connect(self.window.show_about)
         self.tray.quit_requested.connect(self.shutdown)
         self.window.router_enabled_changed.connect(self.tray.set_enabled)
         self.window.close_quit_requested.connect(self.shutdown)
@@ -79,6 +82,9 @@ class DesktopApplication(QObject):
             automatic.stop()
         self.window.routing_service.stop()
         self.window.runtime.stop()
+        self.window.settings_dialog.close()
+        self.window.diagnostics_dialog.close()
+        self.window.about_dialog.close()
 
     def _window_hidden(self) -> None:
         if not self._close_message_shown:

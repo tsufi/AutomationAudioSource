@@ -1611,6 +1611,13 @@ the stable desktop identity `screen-audio-router`. Runtime icon loading uses the
 packaged PNG independently of the working directory; the freedesktop launcher uses
 the same icon name for a user-installed hicolor asset.
 
+Phase 15 / v1.0 release status: package version is sourced from
+`screen_audio_router.__version__`; the About dialog and diagnostics expose it. A
+user-session advisory lock prevents duplicate GUI routing runtimes. User-level
+install and uninstall scripts own only the dedicated environment, launcher, icon,
+KWin package, and managed autostart entry; persistent routing configuration is
+preserved by default.
+
 ---
 
 # Phase 14 — Per-Display Audio Output Mapping

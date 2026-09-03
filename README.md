@@ -6,13 +6,11 @@ application's controlling window. It is designed for PipeWire through its
 PulseAudio compatibility layer and never needs to change the global default sink
 for normal routing.
 
-The project is currently at **Phase 13: Continuous AUTO Runtime Routing**. It can inspect the local
-PipeWire/PulseAudio-compatible server and perform an explicitly requested stream
-move through a reusable backend. A separate KWin 6 script reports live Wayland
-window facts over user-session DBus. An in-process registry groups windows by
-stable application identity and conservatively associates audio streams. It now
-continuously routes explicitly configured `AUTO` applications after initial runtime
-readiness. The native Qt window shows live application,
+Version **1.0.0** is ready for normal user-level installation. A KWin 6 script
+reports live Wayland window facts over user-session DBus, while an in-process
+registry groups windows by stable application identity and conservatively
+associates audio streams. The application continuously routes explicitly configured
+`AUTO` applications after initial runtime readiness. The native Qt window shows live application,
 screen, audio-output, routing-mode, and decision status data. It persists `IGNORE`,
 `AUTO`, `FIXED_DEVICE`, fixed-output, and global enabled selections. Runtime
 execution applies only to configured AUTO rules. A direct mode/device selection or
@@ -62,6 +60,28 @@ Run from the repository after installation:
 python -m screen_audio_router
 ```
 
+## Install and uninstall
+
+Install for the current user without root access:
+
+```bash
+./scripts/install.sh
+```
+
+This creates a dedicated environment under the user XDG data directory, installs
+the executable in `~/.local/bin`, installs the launcher and icon, and installs the
+KWin reporter script. Re-running the command updates the same installation. Ensure
+`~/.local/bin` is on the login `PATH` before enabling autostart.
+
+Uninstall application-owned files while preserving all routing rules and mappings:
+
+```bash
+./scripts/uninstall.sh
+```
+
+Configuration remains at `~/.config/screen-audio-router/`. Remove that directory
+separately only when a deliberate full configuration reset is wanted.
+
 The GUI owns the project DBus receiver while it is running, obtains KWin events
 live, and discovers audio streams and outputs on a worker thread so the Qt event
 loop remains responsive. Only one Screen Audio Router GUI or debug watcher can own
@@ -94,8 +114,9 @@ database is maintained.
 ## System tray and lifecycle
 
 On desktops with a system tray, Screen Audio Router shows a native Qt tray icon
-with `Open`, a checkable `Router Enabled` action, the logical application count,
-and `Quit`. Closing the main window hides it while keeping the same runtime,
+with shortcuts for the main window, Display Mappings, Diagnostics, and About, plus
+a checkable `Router Enabled` action, the logical application count, and `Quit`.
+Closing the main window hides it while keeping the same runtime,
 KWin DBus ownership, application registry, and audio discovery worker alive.
 `Open` restores the same window and state; it does not construct another runtime.
 The first close in a session shows a brief tray reminder.
@@ -108,8 +129,9 @@ runtime uses exactly the same continuous policy as a visible window.
 `Quit` and terminal Ctrl+C use the same clean shutdown path, releasing the KWin
 DBus service, stopping polling and timers, waiting for worker executors, and removing
 the tray icon. If no system tray is available, closing the main window quits instead
-of leaving an invisible process. Independently
-launched instances may still conflict over the single KWin DBus receiver service.
+of leaving an invisible process. The GUI holds a user-session lock, so a second
+launch exits cleanly before creating
+another routing runtime. Read-only command-line inspection remains independent.
 
 ## Diagnostics
 
@@ -287,10 +309,10 @@ python -m screen_audio_router config map-display <DISPLAY_ID> <SINK_NAME>
 python -m screen_audio_router config unmap-display <DISPLAY_ID>
 ```
 
-Current audio identities are stable pactl sink names. Until richer KScreen/EDID
-discovery is implemented, mappings created by the CLI explicitly mark their
-display identity as `connector_fallback`; connector names are not claimed to be
-physically stable. Missing displays and outputs remain in configuration.
+Current audio identities are stable pactl sink names. The GUI discovers validated
+EDID identities for physical displays. CLI connector mappings remain explicit
+legacy fallbacks and can be converted safely in Display Mappings. Missing displays
+and outputs remain in configuration without arbitrary reassignment.
 
 Malformed JSON and unsupported future schema versions are rejected without
 overwriting the file. An invalid fixed-device application rule is skipped with a
@@ -324,3 +346,12 @@ repository and installed Python launches do not depend on the current directory.
 Run `scripts/install-desktop-assets.sh` to install the 1254×1254 icon and launcher
 under the current user's XDG data directory. The launcher, KDE desktop identity,
 and managed autostart entry use the icon name `screen-audio-router`.
+
+## Troubleshooting and limitations
+
+- `pactl` must be available and able to reach the user's PipeWire/PulseAudio server.
+- KDE Plasma 6, KWin, and Wayland are the supported window-tracking environment.
+- If display discovery or an audio output is unavailable, routing remains a safe
+  no-action and Diagnostics reports the failure.
+- Ambiguous audio streams are intentionally left untouched.
+- No global default sink is changed, and no root access is required.

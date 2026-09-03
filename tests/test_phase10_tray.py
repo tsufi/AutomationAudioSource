@@ -105,8 +105,11 @@ def make_desktop(qt_app, *, enabled=True, tray_available=True):
 def test_tray_controller_has_required_menu_and_reflects_config(qt_app, enabled):
     tray = SystemTrayController(enabled, available=False)
     texts = [action.text() for action in tray.menu.actions()]
-    assert "Open" in texts
+    assert "Open Screen Audio Router" in texts
     assert "Router Enabled" in texts
+    assert "Display Mappings" in texts
+    assert "Diagnostics" in texts
+    assert "About" in texts
     assert "Quit" in texts
     assert tray.enabled_action.isCheckable()
     assert tray.enabled_action.isChecked() is enabled
@@ -135,6 +138,18 @@ def test_main_window_enabled_change_updates_tray(qt_app):
     assert store.saved[-1]["enabled"] is False
     assert not desktop.tray.enabled_action.isChecked()
     assert runtime.backend.moves == []
+    desktop.shutdown()
+
+
+def test_tray_shortcuts_reuse_existing_dialogs(qt_app):
+    desktop, _, _, _ = make_desktop(qt_app)
+    desktop.tray.display_mappings_action.trigger()
+    desktop.tray.diagnostics_action.trigger()
+    desktop.tray.about_action.trigger()
+    qt_app.processEvents()
+    assert desktop.window.settings_dialog.isVisible()
+    assert desktop.window.diagnostics_dialog.isVisible()
+    assert desktop.window.about_dialog.isVisible()
     desktop.shutdown()
 
 

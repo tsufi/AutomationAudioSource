@@ -6,6 +6,7 @@ import pytest
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QApplication
 
+from screen_audio_router import __version__
 from screen_audio_router.audio.models import AudioOutput, AudioStream, Availability
 from screen_audio_router.config.schema import (
     AppConfig,
@@ -139,6 +140,8 @@ def test_snapshot_overview_health_and_logical_counts(enabled):
     assert len(value.outputs) == 1
     assert len(value.streams) == 1
     assert len(value.windows) == 1
+    assert value.application_version == __version__
+    assert f"Version: {__version__}" in render_diagnostic_report(value)
 
 
 def test_configured_and_unconfigured_application_diagnostics():

@@ -14,6 +14,9 @@ class SystemTrayController(QObject):
 
     open_requested = Signal()
     enabled_requested = Signal(bool)
+    display_mappings_requested = Signal()
+    diagnostics_requested = Signal()
+    about_requested = Signal()
     quit_requested = Signal()
 
     def __init__(self, enabled: bool, parent=None, *, available: bool | None = None) -> None:
@@ -22,10 +25,7 @@ class SystemTrayController(QObject):
         self.available = detected if available is None else available
         self.tray_icon = QSystemTrayIcon(application_icon(), self)
         self.menu = QMenu()
-        self.title_action = self.menu.addAction("Screen Audio Router")
-        self.title_action.setEnabled(False)
-        self.menu.addSeparator()
-        self.open_action = self.menu.addAction("Open")
+        self.open_action = self.menu.addAction("Open Screen Audio Router")
         self.enabled_action = QAction("Router Enabled", self.menu)
         self.enabled_action.setCheckable(True)
         self.enabled_action.setChecked(enabled)
@@ -33,12 +33,19 @@ class SystemTrayController(QObject):
         self.status_action = self.menu.addAction("Applications detected: 0")
         self.status_action.setEnabled(False)
         self.menu.addSeparator()
+        self.display_mappings_action = self.menu.addAction("Display Mappings")
+        self.diagnostics_action = self.menu.addAction("Diagnostics")
+        self.about_action = self.menu.addAction("About")
+        self.menu.addSeparator()
         self.quit_action = self.menu.addAction("Quit")
         self.tray_icon.setContextMenu(self.menu)
         self.set_application_count(0)
 
         self.open_action.triggered.connect(self.open_requested)
         self.enabled_action.toggled.connect(self.enabled_requested)
+        self.display_mappings_action.triggered.connect(self.display_mappings_requested)
+        self.diagnostics_action.triggered.connect(self.diagnostics_requested)
+        self.about_action.triggered.connect(self.about_requested)
         self.quit_action.triggered.connect(self.quit_requested)
         self.tray_icon.activated.connect(self._activated)
 

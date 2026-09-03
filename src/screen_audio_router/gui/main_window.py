@@ -37,6 +37,7 @@ from screen_audio_router.diagnostics import (
 )
 from screen_audio_router.display_mapping import MappingOperationStatus, MigrationStatus
 from screen_audio_router.display_runtime import DisplayRuntimeContext
+from screen_audio_router.gui.about import AboutDialog
 from screen_audio_router.gui.application_list import (
     ApplicationTableModel,
     ApplicationViewModel,
@@ -104,6 +105,7 @@ class MainWindow(QMainWindow):
         )
         self.setWindowTitle("Screen Audio Router")
         self.setWindowIcon(application_icon())
+        self.setMinimumSize(720, 480)
         self.resize(1040, 620)
         self.enabled_checkbox = QCheckBox("Router enabled")
         self.enabled_checkbox.setChecked(config.enabled)
@@ -112,6 +114,7 @@ class MainWindow(QMainWindow):
         )
         self.diagnostics_button = QPushButton("Diagnostics")
         self.settings_button = QPushButton("Display Mappings")
+        self.about_button = QPushButton("About")
         self.autostart_checkbox = QCheckBox("Start automatically at login")
         autostart_status = self.autostart_manager.status()
         self.autostart_checkbox.setChecked(autostart_status.enabled)
@@ -218,6 +221,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.autostart_checkbox)
         layout.addWidget(self.diagnostics_button)
         layout.addWidget(self.settings_button)
+        layout.addWidget(self.about_button)
         layout.addWidget(self.main_splitter, 1)
         self.setCentralWidget(container)
         self.statusBar().showMessage("Waiting for live KWin and audio data…")
@@ -226,6 +230,7 @@ class MainWindow(QMainWindow):
         self.autostart_checkbox.toggled.connect(self._autostart_changed)
         self.diagnostics_button.clicked.connect(self.show_diagnostics)
         self.settings_button.clicked.connect(self.show_settings)
+        self.about_button.clicked.connect(self.show_about)
         self.fixed_output.currentIndexChanged.connect(self._fixed_output_changed)
         self.apply_button.clicked.connect(self._apply_now)
         self.reset_button.clicked.connect(self._reset_configuration)
@@ -251,6 +256,7 @@ class MainWindow(QMainWindow):
         self._tray_available = False
         self.diagnostics_dialog = DiagnosticsDialog(self._diagnostic_snapshot, self)
         self.settings_dialog = DisplayMappingSettingsDialog(self.display_context, self)
+        self.about_dialog = AboutDialog(self)
         self.settings_dialog.mapping_result.connect(self._mapping_result)
         self.settings_dialog.migration_result.connect(self._migration_result)
         self.settings_dialog.display_refreshed.connect(self._display_refreshed)
@@ -617,6 +623,9 @@ class MainWindow(QMainWindow):
     def show_settings(self) -> None:
         self.settings_dialog.set_outputs(tuple(self.view_model.outputs))
         self.settings_dialog.show_and_refresh()
+
+    def show_about(self) -> None:
+        self.about_dialog.show_dialog()
 
     def _refresh_displays(self) -> None:
         result = self.display_context.refresh()

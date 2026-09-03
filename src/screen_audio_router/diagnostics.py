@@ -9,6 +9,7 @@ from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 
+from screen_audio_router import __version__
 from screen_audio_router.audio.models import AudioOutput, AudioStream
 from screen_audio_router.config.resolver import RoutingConfigResolver
 from screen_audio_router.config.schema import AppConfig
@@ -108,6 +109,7 @@ class DisplayMappingDiagnostic:
 @dataclass(frozen=True, slots=True)
 class DiagnosticSnapshot:
     generated_at: datetime
+    application_version: str
     router_enabled: bool
     audio_backend_health: str
     kwin_health: str
@@ -239,6 +241,7 @@ def build_diagnostic_snapshot(
     )
     return DiagnosticSnapshot(
         datetime.now().astimezone(),
+        __version__,
         config.enabled,
         audio_backend_health,
         kwin_health,
@@ -284,6 +287,7 @@ def render_diagnostic_report(snapshot: DiagnosticSnapshot) -> str:
     lines = [
         "Screen Audio Router Diagnostics",
         f"Generated: {snapshot.generated_at.strftime('%Y-%m-%d %H:%M:%S %Z')}",
+        f"Version: {snapshot.application_version}",
         "",
         "Overview",
         "--------",

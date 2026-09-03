@@ -55,15 +55,21 @@ def main() -> int:
     from screen_audio_router.gui import DesktopApplication
     from screen_audio_router.gui.icons import configure_application_icon
     from screen_audio_router.gui.main_window import configuration_error_message
+    from screen_audio_router.single_instance import InstanceGuard
 
     logger = logging.getLogger(__name__)
     app = QApplication([sys.argv[0], *arguments])
     app.setApplicationName("Screen Audio Router")
     app.setOrganizationName("Screen Audio Router")
     configure_application_icon(app)
+    instance_guard = InstanceGuard()
+    if not instance_guard.acquire():
+        logger.warning("Screen Audio Router is already running in this user session")
+        return 0
     try:
         config = ConfigManager().load()
     except ConfigError as exc:
+        instance_guard.release()
         logger.error("Configuration error: %s", exc)
         QMessageBox.critical(None, "Configuration Error", configuration_error_message(exc))
         return 2
@@ -75,4 +81,6 @@ def main() -> int:
     signal_timer = QTimer()
     signal_timer.timeout.connect(lambda: None)
     signal_timer.start(250)
-    return app.exec()
+    result = app.exec()
+    instance_guard.release()
+    return result

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "screen-audio-router"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Per-application audio routing based on the active KDE display"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -26,6 +26,9 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 screen_audio_router = ["assets/*.png"]
+
+[tool.setuptools.dynamic]
+version = { attr = "screen_audio_router.__version__" }
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
