@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Screen Audio Router
+Comment=Route application audio according to its physical display
+Exec=screen-audio-router
+Icon=screen-audio-router
+Terminal=false
+Categories=AudioVideo;Audio;Utility;
+StartupNotify=true

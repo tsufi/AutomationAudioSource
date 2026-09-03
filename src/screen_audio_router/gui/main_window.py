@@ -44,6 +44,7 @@ from screen_audio_router.gui.application_list import (
 )
 from screen_audio_router.gui.automatic_routing import AutomaticRoutingService
 from screen_audio_router.gui.diagnostics import DiagnosticsDialog
+from screen_audio_router.gui.icons import application_icon
 from screen_audio_router.gui.manual_routing import ManualRoutingService
 from screen_audio_router.gui.runtime import GuiRuntime
 from screen_audio_router.gui.settings_window import DisplayMappingSettingsDialog
@@ -102,6 +103,7 @@ class MainWindow(QMainWindow):
             display_mappings=self.display_context.routing_mappings,
         )
         self.setWindowTitle("Screen Audio Router")
+        self.setWindowIcon(application_icon())
         self.resize(1040, 620)
         self.enabled_checkbox = QCheckBox("Router enabled")
         self.enabled_checkbox.setChecked(config.enabled)

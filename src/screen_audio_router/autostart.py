@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
+from screen_audio_router.identity import APPLICATION_ICON_NAME
+
 AUTOSTART_FILENAME = "screen-audio-router.desktop"
 MANAGED_MARKER = "X-ScreenAudioRouter-Managed=true"
 
@@ -131,7 +133,7 @@ class AutostartManager:
             "Type=Application\n"
             "Name=Screen Audio Router\n"
             f"Exec={command}\n"
-            "Icon=audio-card\n"
+            f"Icon={APPLICATION_ICON_NAME}\n"
             "Terminal=false\n"
             "X-GNOME-Autostart-enabled=true\n"
             f"{MANAGED_MARKER}\n"

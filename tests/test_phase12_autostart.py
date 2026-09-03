@@ -56,6 +56,7 @@ def test_enable_creates_valid_managed_desktop_entry_atomically(tmp_path):
     assert "Type=Application" in content
     assert "Name=Screen Audio Router" in content
     assert "Exec=screen-audio-router --autostart" in content
+    assert "Icon=screen-audio-router" in content
     assert "Terminal=false" in content
     assert MANAGED_MARKER in content
     assert "/run/media/" not in content

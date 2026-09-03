@@ -316,3 +316,11 @@ FIXED_DEVICE rules remain unaffected.
 Phase 14D live acceptance verified Plezy routing between GC7 and the Samsung HDMI
 output using stable physical display mappings. Opening or refreshing Settings is
 read-only unless the user explicitly changes or converts a mapping.
+
+## Application icon
+
+The official icon is packaged at `src/screen_audio_router/assets/icon.png`, so
+repository and installed Python launches do not depend on the current directory.
+Run `scripts/install-desktop-assets.sh` to install the 1254×1254 icon and launcher
+under the current user's XDG data directory. The launcher, KDE desktop identity,
+and managed autostart entry use the icon name `screen-audio-router`.

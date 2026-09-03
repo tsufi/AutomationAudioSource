@@ -1606,6 +1606,11 @@ VP278 on GC7 and Samsung TV on its exact HDMI output. It also added conservative
 post-move backend revalidation, deferred audio refresh handling, shutdown safety,
 and focused main-window usability fixes without changing global sink state.
 
+The Qt application, main window, tray, launcher, and managed autostart entry share
+the stable desktop identity `screen-audio-router`. Runtime icon loading uses the
+packaged PNG independently of the working directory; the freedesktop launcher uses
+the same icon name for a user-installed hicolor asset.
+
 ---
 
 # Phase 14 — Per-Display Audio Output Mapping

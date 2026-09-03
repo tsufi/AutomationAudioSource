@@ -265,6 +265,7 @@ def test_main_window_receives_snapshots_and_shows_details(qt_app):
     assert window.model.rowCount() == 1
     assert window.detail_id.text() == "app.one"
     assert "1 window" in window.detail_counts.text()
+    assert not window.windowIcon().isNull()
     window.close()
     assert runtime.stopped is True
 

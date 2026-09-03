@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QObject, Signal
-from PySide6.QtGui import QAction, QIcon
-from PySide6.QtWidgets import QApplication, QMenu, QStyle, QSystemTrayIcon
+from PySide6.QtGui import QAction
+from PySide6.QtWidgets import QMenu, QSystemTrayIcon
+
+from screen_audio_router.gui.icons import application_icon
 
 
 class SystemTrayController(QObject):
@@ -18,7 +20,7 @@ class SystemTrayController(QObject):
         super().__init__(parent)
         detected = QSystemTrayIcon.isSystemTrayAvailable()
         self.available = detected if available is None else available
-        self.tray_icon = QSystemTrayIcon(_application_icon(), self)
+        self.tray_icon = QSystemTrayIcon(application_icon(), self)
         self.menu = QMenu()
         self.title_action = self.menu.addAction("Screen Audio Router")
         self.title_action.setEnabled(False)
@@ -79,11 +81,3 @@ class SystemTrayController(QObject):
             QSystemTrayIcon.ActivationReason.DoubleClick,
         }:
             self.open_requested.emit()
-
-
-def _application_icon() -> QIcon:
-    icon = QIcon.fromTheme("audio-card")
-    if not icon.isNull():
-        return icon
-    app = QApplication.instance()
-    return app.style().standardIcon(QStyle.StandardPixmap.SP_MediaVolume) if app else QIcon()

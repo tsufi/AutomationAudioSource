@@ -53,12 +53,14 @@ def main() -> int:
 
     from screen_audio_router.config import ConfigError, ConfigManager
     from screen_audio_router.gui import DesktopApplication
+    from screen_audio_router.gui.icons import configure_application_icon
     from screen_audio_router.gui.main_window import configuration_error_message
 
     logger = logging.getLogger(__name__)
     app = QApplication([sys.argv[0], *arguments])
     app.setApplicationName("Screen Audio Router")
     app.setOrganizationName("Screen Audio Router")
+    configure_application_icon(app)
     try:
         config = ConfigManager().load()
     except ConfigError as exc:

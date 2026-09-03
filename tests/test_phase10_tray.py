@@ -110,6 +110,7 @@ def test_tray_controller_has_required_menu_and_reflects_config(qt_app, enabled):
     assert "Quit" in texts
     assert tray.enabled_action.isCheckable()
     assert tray.enabled_action.isChecked() is enabled
+    assert not tray.tray_icon.icon().isNull()
 
 
 @pytest.mark.parametrize(("initial", "requested"), [(True, False), (False, True)])
