@@ -19,7 +19,7 @@ def qt_app():
 
 
 def test_canonical_release_version_is_available():
-    assert __version__ == "1.0.0"
+    assert __version__ == "1.0.1"
     metadata = json.loads(
         (Path(__file__).parents[1] / "kwin/screen-audio-router/metadata.json").read_text()
     )

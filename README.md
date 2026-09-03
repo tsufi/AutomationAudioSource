@@ -6,7 +6,7 @@ application's controlling window. It is designed for PipeWire through its
 PulseAudio compatibility layer and never needs to change the global default sink
 for normal routing.
 
-Version **1.0.0** is ready for normal user-level installation. A KWin 6 script
+Version **1.0.1** is ready for normal user-level installation. A KWin 6 script
 reports live Wayland window facts over user-session DBus, while an in-process
 registry groups windows by stable application identity and conservatively
 associates audio streams. The application continuously routes explicitly configured

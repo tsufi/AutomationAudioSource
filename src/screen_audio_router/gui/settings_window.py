@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QTimer, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -23,6 +23,30 @@ from screen_audio_router.display_mapping import (
     MigrationStatus,
 )
 from screen_audio_router.display_runtime import DisplayRuntimeContext
+
+
+class MappingOutputSelector(QComboBox):
+    """Report popup interaction so background refreshes cannot replace the editor."""
+
+    popup_opened = Signal()
+    popup_closed = Signal()
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.popup_visible = False
+
+    def showPopup(self) -> None:
+        if not self.popup_visible:
+            self.popup_visible = True
+            self.popup_opened.emit()
+        super().showPopup()
+
+    def hidePopup(self) -> None:
+        was_visible = self.popup_visible
+        super().hidePopup()
+        if was_visible:
+            self.popup_visible = False
+            self.popup_closed.emit()
 
 
 class DisplayMappingSettingsDialog(QDialog):
@@ -66,6 +90,8 @@ class DisplayMappingSettingsDialog(QDialog):
         self.migrate_button.clicked.connect(self._confirm_migration)
         self.close_button.clicked.connect(self.close)
         self._migration_source: str | None = None
+        self._active_output_popups = 0
+        self._row_refresh_pending = False
 
     def show_and_refresh(self) -> None:
         self.refresh_displays()
@@ -74,6 +100,8 @@ class DisplayMappingSettingsDialog(QDialog):
         self.activateWindow()
 
     def set_outputs(self, outputs: tuple[AudioOutput, ...]) -> None:
+        if outputs == self.outputs:
+            return
         self.outputs = outputs
         self.refresh_rows()
 
@@ -83,6 +111,10 @@ class DisplayMappingSettingsDialog(QDialog):
         self.refresh_rows()
 
     def refresh_rows(self) -> None:
+        if self._active_output_popups:
+            self._row_refresh_pending = True
+            return
+        self._row_refresh_pending = False
         rows = self.context.service.rows(self.context.displays, self.outputs)
         self.table.setRowCount(len(rows))
         for index, row in enumerate(rows):
@@ -132,8 +164,8 @@ class DisplayMappingSettingsDialog(QDialog):
         persisted_display_id: str | None,
         selected: str | None,
         connected: bool,
-    ) -> QComboBox:
-        selector = QComboBox()
+    ) -> MappingOutputSelector:
+        selector = MappingOutputSelector()
         selector.addItem("No automatic routing", None)
         for output in self.outputs:
             label = output.description
@@ -144,12 +176,27 @@ class DisplayMappingSettingsDialog(QDialog):
             selector.addItem(f"{selected} (Unavailable)", selected)
         selector.setCurrentIndex(max(0, selector.findData(selected)))
         selector.setEnabled(connected)
+        selector.popup_opened.connect(self._output_interaction_started)
+        selector.popup_closed.connect(self._output_interaction_finished)
         selector.activated.connect(
             lambda _index, current=selector, identity=display_id, persisted=persisted_display_id: (
                 self._selection_changed(identity, persisted, current.currentData())
             )
         )
         return selector
+
+    def _output_interaction_started(self) -> None:
+        self._active_output_popups += 1
+
+    def _output_interaction_finished(self) -> None:
+        self._active_output_popups = max(0, self._active_output_popups - 1)
+        if not self._active_output_popups and self._row_refresh_pending:
+            QTimer.singleShot(0, self._flush_pending_row_refresh)
+
+    def _flush_pending_row_refresh(self) -> None:
+        if self._active_output_popups or not self._row_refresh_pending:
+            return
+        self.refresh_rows()
 
     def _selection_changed(
         self, display_id: str, persisted_display_id: str | None, output_id: str | None

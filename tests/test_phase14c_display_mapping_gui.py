@@ -202,6 +202,61 @@ def test_settings_uses_friendly_output_choices(qt_app):
     dialog.close()
 
 
+def test_output_popup_survives_refresh_and_commits_stable_id_once(qt_app):
+    store = Store()
+    value = context(store=store)
+    value.refresh()
+    dialog = DisplayMappingSettingsDialog(value)
+    outputs = (output(), output("gc7", name="GC7"))
+    dialog.set_outputs(outputs)
+    dialog.show()
+    selector = dialog.table.cellWidget(0, 2)
+    selector.showPopup()
+    qt_app.processEvents()
+
+    dialog.set_outputs(outputs)
+
+    assert dialog.table.cellWidget(0, 2) is selector
+    assert selector.popup_visible is True
+    assert store.saved == []
+
+    selector.setCurrentIndex(selector.findData("gc7"))
+    selector.activated.emit(selector.currentIndex())
+    assert len(store.saved) == 1
+    assert store.saved[0]["display_mappings"][0]["output"]["id"] == "gc7"
+
+    selector.hidePopup()
+    qt_app.processEvents()
+    replacement = dialog.table.cellWidget(0, 2)
+    assert replacement.currentData() == "gc7"
+    assert len(store.saved) == 1
+    dialog.close()
+
+
+def test_changed_outputs_defer_until_popup_closes_and_preserve_stable_id(qt_app):
+    store = Store()
+    value = context(AppConfig(display_mappings=[stable_mapping()]), store)
+    value.refresh()
+    dialog = DisplayMappingSettingsDialog(value)
+    dialog.set_outputs((output(),))
+    dialog.show()
+    selector = dialog.table.cellWidget(0, 2)
+    selector.showPopup()
+
+    dialog.set_outputs((output(name="Renamed HDMI"), output("gc7", name="GC7")))
+
+    assert dialog.table.cellWidget(0, 2) is selector
+    assert selector.popup_visible is True
+    assert store.saved == []
+    selector.hidePopup()
+    qt_app.processEvents()
+    replacement = dialog.table.cellWidget(0, 2)
+    assert replacement.currentData() == "hdmi"
+    assert replacement.currentText() == "Renamed HDMI"
+    assert store.saved == []
+    dialog.close()
+
+
 @pytest.mark.parametrize(
     "output_id,status",
     [("hdmi", MappingOperationStatus.APPLIED), ("7", MappingOperationStatus.INVALID_OUTPUT)],

@@ -3,7 +3,7 @@
     "Name": "Screen Audio Router Window Reporter",
     "Description": "Reports KWin window facts to Screen Audio Router over session DBus",
     "Id": "screen-audio-router",
-    "Version": "1.0.0",
+    "Version": "1.0.1",
     "License": "MIT"
   },
   "X-Plasma-API": "javascript",
