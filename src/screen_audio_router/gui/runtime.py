@@ -23,6 +23,7 @@ class GuiRuntime(QObject):
     snapshot_changed = Signal(object, object)
     ready = Signal()
     error_occurred = Signal(str)
+    display_refresh_requested = Signal()
 
     def __init__(self, matcher: ApplicationMatcher, poll_interval_ms: int, parent=None) -> None:
         super().__init__(parent)
@@ -33,6 +34,7 @@ class GuiRuntime(QObject):
         self._service = KWinDBusService(self.kwin)
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="audio-discovery")
         self._audio_pending = False
+        self._audio_refresh_deferred = False
         self._started = False
         self._stopped = False
         self._window_snapshot_ready = False
@@ -76,7 +78,10 @@ class GuiRuntime(QObject):
         self._executor.shutdown(wait=True, cancel_futures=True)
 
     def refresh_audio(self) -> None:
+        if self._stopped:
+            return
         if self._audio_pending:
+            self._audio_refresh_deferred = True
             return
         self._audio_pending = True
         future = self._executor.submit(self._discover_audio)
@@ -106,13 +111,22 @@ class GuiRuntime(QObject):
         if streams_changed or outputs_changed or first_audio_snapshot:
             self._emit_snapshot()
         self._emit_ready_if_synchronized()
+        self._run_deferred_audio_refresh()
 
     def _audio_failed(self, message: str) -> None:
         self._audio_pending = False
         self.audio_error = message
         self.error_occurred.emit(message)
+        self._run_deferred_audio_refresh()
+
+    def _run_deferred_audio_refresh(self) -> None:
+        if self._audio_refresh_deferred and not self._stopped:
+            self._audio_refresh_deferred = False
+            self.refresh_audio()
 
     def _window_event(self, event) -> None:
+        if event.event_type in {WindowEventType.SNAPSHOT, WindowEventType.OUTPUT_CHANGED}:
+            self.display_refresh_requested.emit()
         if event.event_type is WindowEventType.SNAPSHOT:
             self.registry.sync_windows(self.kwin.windows(include_all=True))
             self._window_snapshot_ready = True

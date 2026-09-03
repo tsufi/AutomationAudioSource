@@ -297,3 +297,22 @@ overwriting the file. An invalid fixed-device application rule is skipped with a
 visible warning so other valid rules remain usable. Unknown top-level fields are
 preserved across a load/save round trip; unknown nested fields are currently not
 preserved. Unknown applications always resolve to `IGNORE`.
+
+## Physical display mappings
+
+The **Display Mappings** window discovers connected DRM displays and identifies
+them using validated EDID serial or fingerprint identities when possible. Choose
+an audio output for each display, or choose **No automatic routing**. Persisted
+disconnected displays and unavailable mapped outputs remain visible and are never
+silently reassigned.
+
+Older connector mappings remain compatible. When one can be matched safely to a
+single physical display, Settings offers an explicit, confirmed conversion; the
+application never migrates mappings merely because it started or Settings was
+opened. Successful mapping changes ask the existing AUTO controller to reevaluate
+only AUTO applications currently on the affected connector. IGNORE and
+FIXED_DEVICE rules remain unaffected.
+
+Phase 14D live acceptance verified Plezy routing between GC7 and the Samsung HDMI
+output using stable physical display mappings. Opening or refreshing Settings is
+read-only unless the user explicitly changes or converts a mapping.

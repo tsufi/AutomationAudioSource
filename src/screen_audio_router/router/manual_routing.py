@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 
 from screen_audio_router.audio.backend import AudioBackend
@@ -11,6 +12,7 @@ from screen_audio_router.config.resolver import RoutingConfigResolver
 from screen_audio_router.config.schema import AppConfig, RoutingMode
 from screen_audio_router.router.application_registry import ApplicationEntry
 from screen_audio_router.router.decisions import (
+    DisplayAudioMapping,
     RouteAction,
     RouteDecision,
     RouteExecutionResult,
@@ -40,11 +42,13 @@ class ManualRoutingController:
         backend: AudioBackend,
         engine: RouterEngine | None = None,
         execution_lock=None,
+        display_mappings: Callable[[], tuple[DisplayAudioMapping, ...]] | None = None,
     ) -> None:
         self.config = config
         self.store = store
         self.engine = engine or RouterEngine()
         self.executor = RouteExecutor(backend, execution_lock)
+        self._display_mappings = display_mappings
 
     def change_mode(
         self,
@@ -108,7 +112,7 @@ class ManualRoutingController:
         decision = self.engine.decide(
             application,
             resolver.application_rule(application.application_id),
-            resolver.display_mappings(),
+            self._resolved_display_mappings(resolver),
             outputs,
             enabled=resolver.enabled,
         )
@@ -127,12 +131,17 @@ class ManualRoutingController:
         decision = self.engine.decide(
             application,
             resolver.application_rule(application.application_id),
-            resolver.display_mappings(),
+            self._resolved_display_mappings(resolver),
             outputs,
             enabled=resolver.enabled,
         )
         execution = self.executor.execute(decision) if decision.action is RouteAction.MOVE else None
         return _operation_result(application, outputs, decision, execution)
+
+    def _resolved_display_mappings(
+        self, resolver: RoutingConfigResolver
+    ) -> tuple[DisplayAudioMapping, ...]:
+        return self._display_mappings() if self._display_mappings else resolver.display_mappings()
 
 
 def _operation_result(

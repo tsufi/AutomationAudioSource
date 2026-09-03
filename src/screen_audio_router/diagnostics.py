@@ -12,6 +12,7 @@ from pathlib import Path
 from screen_audio_router.audio.models import AudioOutput, AudioStream
 from screen_audio_router.config.resolver import RoutingConfigResolver
 from screen_audio_router.config.schema import AppConfig
+from screen_audio_router.display_mapping import DisplayMappingRow
 from screen_audio_router.kwin.models import WindowInfo
 from screen_audio_router.router.application_registry import ApplicationEntry, UnmatchedStream
 from screen_audio_router.router.decisions import RouteAction, RouteDecision, RouteReason
@@ -98,6 +99,10 @@ class DisplayMappingDiagnostic:
     output_id: str
     output_name: str
     available: bool
+    connector: str | None = None
+    connected: bool = False
+    mapping_origin: str = "none"
+    migration_status: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,6 +114,8 @@ class DiagnosticSnapshot:
     dbus_health: str
     configuration_health: str
     autostart_health: str
+    display_discovery_health: str
+    connected_display_count: int
     configuration_path: str
     config_version: int
     application_rule_count: int
@@ -135,6 +142,10 @@ def build_diagnostic_snapshot(
     dbus_health: str = "Owned",
     configuration_health: str = "Loaded",
     autostart_health: str = "Disabled",
+    display_rows: tuple[DisplayMappingRow, ...] = (),
+    display_discovery_health: str = "Not integrated",
+    resolved_display_mappings=None,
+    migration_statuses: dict[str, str] | None = None,
 ) -> DiagnosticSnapshot:
     resolver = RoutingConfigResolver(config)
     engine = RouterEngine()
@@ -143,14 +154,12 @@ def build_diagnostic_snapshot(
     all_windows: list[WindowInfo] = []
     for entry in entries:
         relevant_unmatched = tuple(
-            item
-            for item in unmatched
-            if entry.application_id.casefold() in item.reason.casefold()
+            item for item in unmatched if entry.application_id.casefold() in item.reason.casefold()
         )
         decision = engine.decide(
             entry,
             resolver.application_rule(entry.application_id),
-            resolver.display_mappings(),
+            resolved_display_mappings or resolver.display_mappings(),
             outputs,
             enabled=resolver.enabled,
             ambiguous_audio=any("ambiguous" in item.reason for item in relevant_unmatched),
@@ -190,22 +199,43 @@ def build_diagnostic_snapshot(
             )
         )
     output_names = {output.id: output.description for output in outputs}
-    mappings = tuple(
-        DisplayMappingDiagnostic(
-            mapping.display.id,
-            mapping.display.friendly_name or mapping.display.connector or mapping.display.id,
-            mapping.display.identity_kind.value,
-            mapping.output.id,
-            output_names.get(mapping.output.id, mapping.output.description or mapping.output.id),
-            any(
-                output.id == mapping.output.id and output.availability.value == "available"
-                for output in outputs
-            ),
+    if display_rows:
+        mappings = tuple(
+            DisplayMappingDiagnostic(
+                row.display_id,
+                row.friendly_name,
+                row.identity_kind,
+                row.mapped_output_id or "",
+                row.mapped_output_name or "Not mapped",
+                row.output_available,
+                row.connector,
+                row.connected,
+                row.mapping_origin.replace("_", " "),
+                (migration_statuses or {}).get(row.display_id),
+            )
+            for row in display_rows
         )
-        for mapping in config.display_mappings
-    )
-    unique_windows = windows if windows is not None else tuple(
-        {window.runtime_id: window for window in all_windows}.values()
+    else:
+        mappings = tuple(
+            DisplayMappingDiagnostic(
+                mapping.display.id,
+                mapping.display.friendly_name or mapping.display.connector or mapping.display.id,
+                mapping.display.identity_kind.value,
+                mapping.output.id,
+                output_names.get(
+                    mapping.output.id, mapping.output.description or mapping.output.id
+                ),
+                any(
+                    output.id == mapping.output.id and output.availability.value == "available"
+                    for output in outputs
+                ),
+            )
+            for mapping in config.display_mappings
+        )
+    unique_windows = (
+        windows
+        if windows is not None
+        else tuple({window.runtime_id: window for window in all_windows}.values())
     )
     return DiagnosticSnapshot(
         datetime.now().astimezone(),
@@ -215,6 +245,8 @@ def build_diagnostic_snapshot(
         dbus_health,
         configuration_health,
         autostart_health,
+        display_discovery_health,
+        sum(row.connected for row in display_rows),
         str(configuration_path),
         config.version,
         len(config.applications),
@@ -262,6 +294,8 @@ def render_diagnostic_report(snapshot: DiagnosticSnapshot) -> str:
         f"DBus service: {snapshot.dbus_health}",
         f"Configuration: {snapshot.configuration_health}",
         f"Autostart: {snapshot.autostart_health}",
+        f"Display discovery: {snapshot.display_discovery_health}",
+        f"Connected displays: {snapshot.connected_display_count}",
         f"Configuration path: {snapshot.configuration_path}",
         f"Applications: {len(snapshot.applications)}",
         f"Audio outputs: {len(snapshot.outputs)}",
@@ -306,8 +340,12 @@ def render_diagnostic_report(snapshot: DiagnosticSnapshot) -> str:
         )
     lines.extend(["", "Display Mappings", "----------------"])
     for mapping in snapshot.display_mappings:
+        connection = mapping.connector if mapping.connected else "Disconnected"
+        migration = f" | migration={mapping.migration_status}" if mapping.migration_status else ""
         lines.append(
-            f"{mapping.friendly_name} ({mapping.display_id}, {mapping.identity_kind}) -> {mapping.output_name} | {'Available' if mapping.available else 'Unavailable'}"
+            f"{mapping.friendly_name} ({mapping.display_id}, {mapping.identity_kind}) -> "
+            f"{mapping.output_name} | {'Available' if mapping.available else 'Unavailable'} | "
+            f"{connection} | source={mapping.mapping_origin}{migration}"
         )
     lines.extend(
         [

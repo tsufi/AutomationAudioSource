@@ -116,6 +116,20 @@ class Backend:
         self.moves.append((stream_id, destination))
 
 
+class StateBackend(Backend):
+    def __init__(self, current):
+        super().__init__()
+        self.current = current
+
+    def get_stream_output(self, stream_id):
+        del stream_id
+        return self.current
+
+    def move_stream(self, stream_id, destination):
+        super().move_stream(stream_id, destination)
+        self.current = destination
+
+
 def controller(cfg=None, backend=None):
     scheduler = Scheduler()
     backend = backend or Backend()
@@ -144,6 +158,14 @@ def test_startup_waits_for_readiness_then_reconciles_auto():
     ctl.mark_ready()
     scheduler.run()
     assert backend.moves == [("1", "hdmi")]
+
+
+def test_backend_revalidation_skips_move_from_stale_audio_snapshot():
+    backend = StateBackend("hdmi")
+    ctl, scheduler, _, events = controller(backend=backend)
+    synchronize(ctl, scheduler, entry("tv", (("1", "gc7"),)))
+    assert backend.moves == []
+    assert any(event.message == "AUTO backend state already correct" for event in events)
 
 
 @pytest.mark.parametrize("mode", [RoutingMode.IGNORE, RoutingMode.FIXED_DEVICE])
@@ -196,12 +218,13 @@ def test_unmapped_and_missing_or_unavailable_destination_do_not_move():
     synchronize(ctl, scheduler, entry("unmapped"))
     ctl.update_snapshot((entry("tv"),), (output("gc7"),))
     scheduler.run()
-    ctl.update_snapshot(
-        (entry("tv"),), (output("gc7"), output("hdmi", Availability.UNAVAILABLE))
-    )
+    ctl.update_snapshot((entry("tv"),), (output("gc7"), output("hdmi", Availability.UNAVAILABLE)))
     scheduler.run()
     assert backend.moves == []
-    assert {event.decision.reason.value for event in events} >= {"display_unmapped", "destination_missing"}
+    assert {event.decision.reason.value for event in events} >= {
+        "display_unmapped",
+        "destination_missing",
+    }
 
 
 def test_destination_reappearance_and_stream_appearance_route():

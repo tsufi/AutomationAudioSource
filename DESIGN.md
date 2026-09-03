@@ -1586,6 +1586,26 @@ hidden or autostarted, obey Router Enabled, and shut down before runtime workers
 No display-mapping UI, default-sink change, card-profile guessing, or Phase 14
 feature is included.
 
+Phase 14C implementation status: the Settings window now presents connected
+physical displays and retained disconnected mappings with stable audio-output
+choices and explicit unavailable states. Validated EDID identities are resolved
+from the current immutable discovery snapshot, so a stable mapping survives a
+connector change; legacy connector mappings remain compatible and lose priority
+to an explicit stable mapping.
+
+Assignment, removal, and explicit confirmed legacy migration delegate to the
+typed `DisplayMappingService`. No startup or Settings-open migration occurs.
+Successful persisted changes request reevaluation only for configured AUTO
+applications on the affected current connector through the existing automatic
+routing controller. Diagnostics report discovery health, physical identity,
+connector, mapping source, availability, migration state, and mapping-operation
+events without exposing raw EDID.
+
+Phase 14D live acceptance validated Plezy/mpv routing across Odyssey G5 and ASUS
+VP278 on GC7 and Samsung TV on its exact HDMI output. It also added conservative
+post-move backend revalidation, deferred audio refresh handling, shutdown safety,
+and focused main-window usability fixes without changing global sink state.
+
 ---
 
 # Phase 14 — Per-Display Audio Output Mapping

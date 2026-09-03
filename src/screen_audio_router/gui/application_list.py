@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -12,7 +13,12 @@ from screen_audio_router.audio.models import AudioOutput
 from screen_audio_router.config.resolver import RoutingConfigResolver
 from screen_audio_router.config.schema import AppConfig, RoutingMode
 from screen_audio_router.router.application_registry import ApplicationEntry
-from screen_audio_router.router.decisions import RouteAction, RouteDecision, RouteReason
+from screen_audio_router.router.decisions import (
+    DisplayAudioMapping,
+    RouteAction,
+    RouteDecision,
+    RouteReason,
+)
 from screen_audio_router.router.engine import RouterEngine
 
 
@@ -38,9 +44,15 @@ class ApplicationRow:
 
 
 class ApplicationViewModel:
-    def __init__(self, config: AppConfig, store=None) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        store=None,
+        display_mappings: Callable[[], tuple[DisplayAudioMapping, ...]] | None = None,
+    ) -> None:
         self.config = config
         self.engine = RouterEngine()
+        self._display_mappings = display_mappings
         self.entries: tuple[ApplicationEntry, ...] = ()
         self.outputs: tuple[AudioOutput, ...] = ()
 
@@ -54,7 +66,7 @@ class ApplicationViewModel:
             decision = self.engine.decide(
                 entry,
                 rule,
-                resolver.display_mappings(),
+                self._display_mappings() if self._display_mappings else resolver.display_mappings(),
                 self.outputs,
                 enabled=resolver.enabled,
             )
@@ -137,7 +149,7 @@ class ApplicationTableModel(QAbstractTableModel):
         return None
 
     def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
-        if orientation is Qt.Orientation.Horizontal and role is Qt.ItemDataRole.DisplayRole:
+        if orientation == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.DisplayRole:
             return self.HEADERS[section]
         return super().headerData(section, orientation, role)
 
@@ -180,7 +192,12 @@ class RoutingModeDelegate(QStyledItemDelegate):
     def createEditor(self, parent, option, index):
         editor = QComboBox(parent)
         editor.addItems(["Ignore", "Auto", "Fixed Device"])
+        editor.activated.connect(lambda _index: self._commit_and_close(editor))
         return editor
+
+    def _commit_and_close(self, editor: QComboBox) -> None:
+        self.commitData.emit(editor)
+        self.closeEditor.emit(editor)
 
     def setEditorData(self, editor, index):
         editor.setCurrentText(index.data(Qt.ItemDataRole.EditRole))

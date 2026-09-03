@@ -4,9 +4,9 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtTest import QSignalSpy
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QSizePolicy
 
 from screen_audio_router.audio.models import AudioOutput, AudioStream, Availability
 from screen_audio_router.config.schema import (
@@ -20,6 +20,7 @@ from screen_audio_router.config.schema import (
 from screen_audio_router.gui.application_list import (
     ApplicationTableModel,
     ApplicationViewModel,
+    RoutingModeDelegate,
     decision_status,
 )
 from screen_audio_router.gui.main_window import MainWindow, configuration_error_message
@@ -216,6 +217,28 @@ def test_model_tracks_application_appearance_and_disappearance():
     assert model.rowCount() == 0
 
 
+def test_application_table_uses_descriptive_horizontal_headers():
+    model = ApplicationTableModel(ApplicationViewModel(AppConfig(), MemoryStore()))
+    assert [
+        model.headerData(index, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole)
+        for index in range(model.columnCount())
+    ] == ["Application", "Screen", "Audio Output", "Routing", "Status"]
+
+
+def test_routing_mode_mouse_activation_commits_and_closes_editor(qt_app):
+    delegate = RoutingModeDelegate()
+    editor = delegate.createEditor(None, None, None)
+    committed = QSignalSpy(delegate.commitData)
+    closed = QSignalSpy(delegate.closeEditor)
+
+    editor.activated.emit(1)
+
+    assert committed.count() == 1
+    assert committed.at(0)[0] is editor
+    assert closed.count() == 1
+    assert closed.at(0)[0] is editor
+
+
 @pytest.mark.parametrize(
     ("reason", "action", "expected"),
     [
@@ -244,6 +267,30 @@ def test_main_window_receives_snapshots_and_shows_details(qt_app):
     assert "1 window" in window.detail_counts.text()
     window.close()
     assert runtime.stopped is True
+
+
+def test_main_window_uses_resizable_vertical_splitter_and_scrollable_details(qt_app):
+    window = MainWindow(configured(), MemoryStore(), FakeRuntime())
+    window.show()
+    qt_app.processEvents()
+
+    assert window.main_splitter.orientation() == Qt.Orientation.Vertical
+    assert window.main_splitter.count() == 2
+    assert window.main_splitter.widget(1) is window.details_scroll_area
+    assert window.details_scroll_area.widgetResizable() is True
+    assert window.details_scroll_area.widget() is window.application_details
+    assert window.application_details.minimumHeight() < window.application_details.maximumHeight()
+    assert window.application_details.sizePolicy().horizontalPolicy() == (
+        QSizePolicy.Policy.Expanding
+    )
+    assert window.application_details.sizePolicy().verticalPolicy() == (
+        QSizePolicy.Policy.Preferred
+    )
+    assert window.main_splitter.isCollapsible(0) is False
+    assert window.main_splitter.isCollapsible(1) is False
+    assert all(size > 0 for size in window.main_splitter.sizes())
+
+    window.close()
 
 
 def test_main_window_enabled_control_persists(qt_app):
@@ -292,11 +339,7 @@ def test_gui_boundary_contains_no_audio_mutation_or_subprocess_parsing():
 
 def test_kwin_and_polling_runtime_has_no_manual_routing_hook():
     runtime_source = (
-        Path(__file__).parents[1]
-        / "src"
-        / "screen_audio_router"
-        / "gui"
-        / "runtime.py"
+        Path(__file__).parents[1] / "src" / "screen_audio_router" / "gui" / "runtime.py"
     ).read_text()
     for forbidden in ("ManualRoutingController", "RouteExecutor", "execute(", "move_stream"):
         assert forbidden not in runtime_source

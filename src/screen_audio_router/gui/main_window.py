@@ -10,12 +10,16 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFormLayout,
+    QFrame,
     QGroupBox,
     QHeaderView,
     QLabel,
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QSplitter,
     QTableView,
     QVBoxLayout,
     QWidget,
@@ -31,6 +35,8 @@ from screen_audio_router.diagnostics import (
     DiagnosticSeverity,
     build_diagnostic_snapshot,
 )
+from screen_audio_router.display_mapping import MappingOperationStatus, MigrationStatus
+from screen_audio_router.display_runtime import DisplayRuntimeContext
 from screen_audio_router.gui.application_list import (
     ApplicationTableModel,
     ApplicationViewModel,
@@ -40,6 +46,7 @@ from screen_audio_router.gui.automatic_routing import AutomaticRoutingService
 from screen_audio_router.gui.diagnostics import DiagnosticsDialog
 from screen_audio_router.gui.manual_routing import ManualRoutingService
 from screen_audio_router.gui.runtime import GuiRuntime
+from screen_audio_router.gui.settings_window import DisplayMappingSettingsDialog
 from screen_audio_router.router.manual_routing import (
     ManualRoutingController,
     RoutingOperationResult,
@@ -61,12 +68,16 @@ class MainWindow(QMainWindow):
         routing_service: ManualRoutingService | None = None,
         autostart_manager: AutostartManager | None = None,
         automatic_routing_service: AutomaticRoutingService | None = None,
+        display_context: DisplayRuntimeContext | None = None,
     ) -> None:
         super().__init__()
         self.diagnostic_history = DiagnosticEventHistory()
         self.store = store or ConfigurationStore()
         self.autostart_manager = autostart_manager or AutostartManager()
-        self.view_model = ApplicationViewModel(config, self.store)
+        self.display_context = display_context or DisplayRuntimeContext(config, self.store)
+        self.view_model = ApplicationViewModel(
+            config, self.store, self.display_context.routing_mappings
+        )
         self.model = ApplicationTableModel(self.view_model, self)
         resolver = RoutingConfigResolver(config)
         self.runtime = runtime or GuiRuntime(
@@ -75,12 +86,20 @@ class MainWindow(QMainWindow):
         execution_lock = threading.RLock()
         self.routing_service = routing_service or ManualRoutingService(
             ManualRoutingController(
-                config, self.store, self.runtime.backend, execution_lock=execution_lock
+                config,
+                self.store,
+                self.runtime.backend,
+                execution_lock=execution_lock,
+                display_mappings=self.display_context.routing_mappings,
             ),
             self,
         )
         self.automatic_routing_service = automatic_routing_service or AutomaticRoutingService(
-            config, self.runtime.backend, execution_lock, self
+            config,
+            self.runtime.backend,
+            execution_lock,
+            self,
+            display_mappings=self.display_context.routing_mappings,
         )
         self.setWindowTitle("Screen Audio Router")
         self.resize(1040, 620)
@@ -90,6 +109,7 @@ class MainWindow(QMainWindow):
             "Master switch for continuous AUTO routing and explicit routing actions."
         )
         self.diagnostics_button = QPushButton("Diagnostics")
+        self.settings_button = QPushButton("Display Mappings")
         self.autostart_checkbox = QCheckBox("Start automatically at login")
         autostart_status = self.autostart_manager.status()
         self.autostart_checkbox.setChecked(autostart_status.enabled)
@@ -112,8 +132,11 @@ class MainWindow(QMainWindow):
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
 
-        details = QGroupBox("Application details")
-        details_layout = QFormLayout(details)
+        self.application_details = QGroupBox("Application details")
+        self.application_details.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+        )
+        details_layout = QFormLayout(self.application_details)
         self.detail_id = QLabel("—")
         self.detail_name = QLabel("—")
         self.detail_display = QLabel("—")
@@ -152,20 +175,55 @@ class MainWindow(QMainWindow):
         ):
             details_layout.addRow(label, widget)
 
+        table_container = QWidget()
+        table_layout = QVBoxLayout(table_container)
+        table_layout.setContentsMargins(0, 0, 0, 0)
+        table_layout.addWidget(self.empty_state)
+        table_layout.addWidget(self.table, 1)
+        table_container.setMinimumHeight(120)
+        table_container.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
+
+        self.details_scroll_area = QScrollArea()
+        self.details_scroll_area.setWidgetResizable(True)
+        self.details_scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        self.details_scroll_area.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self.details_scroll_area.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self.details_scroll_area.setMinimumHeight(160)
+        self.details_scroll_area.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
+        self.details_scroll_area.setWidget(self.application_details)
+
+        self.main_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.main_splitter.addWidget(table_container)
+        self.main_splitter.addWidget(self.details_scroll_area)
+        self.main_splitter.setChildrenCollapsible(False)
+        self.main_splitter.setCollapsible(0, False)
+        self.main_splitter.setCollapsible(1, False)
+        self.main_splitter.setStretchFactor(0, 3)
+        self.main_splitter.setStretchFactor(1, 2)
+        self.main_splitter.setSizes([360, 240])
+
         container = QWidget()
         layout = QVBoxLayout(container)
         layout.addWidget(self.enabled_checkbox)
         layout.addWidget(self.autostart_checkbox)
         layout.addWidget(self.diagnostics_button)
-        layout.addWidget(self.empty_state)
-        layout.addWidget(self.table, 1)
-        layout.addWidget(details)
+        layout.addWidget(self.settings_button)
+        layout.addWidget(self.main_splitter, 1)
         self.setCentralWidget(container)
         self.statusBar().showMessage("Waiting for live KWin and audio data…")
 
         self.enabled_checkbox.toggled.connect(self._enabled_changed)
         self.autostart_checkbox.toggled.connect(self._autostart_changed)
         self.diagnostics_button.clicked.connect(self.show_diagnostics)
+        self.settings_button.clicked.connect(self.show_settings)
         self.fixed_output.currentIndexChanged.connect(self._fixed_output_changed)
         self.apply_button.clicked.connect(self._apply_now)
         self.reset_button.clicked.connect(self._reset_configuration)
@@ -174,6 +232,9 @@ class MainWindow(QMainWindow):
         self.model.modelReset.connect(self._restore_selection)
         self.model.mode_requested.connect(self._mode_requested)
         self.runtime.snapshot_changed.connect(self._snapshot_changed)
+        display_refresh_requested = getattr(self.runtime, "display_refresh_requested", None)
+        if display_refresh_requested is not None:
+            display_refresh_requested.connect(self._refresh_displays)
         runtime_ready = getattr(self.runtime, "ready", None)
         if runtime_ready is not None:
             runtime_ready.connect(self.automatic_routing_service.controller.mark_ready)
@@ -187,12 +248,18 @@ class MainWindow(QMainWindow):
         self._lifecycle_managed = False
         self._tray_available = False
         self.diagnostics_dialog = DiagnosticsDialog(self._diagnostic_snapshot, self)
+        self.settings_dialog = DisplayMappingSettingsDialog(self.display_context, self)
+        self.settings_dialog.mapping_result.connect(self._mapping_result)
+        self.settings_dialog.migration_result.connect(self._migration_result)
+        self.settings_dialog.display_refreshed.connect(self._display_refreshed)
         self._diagnostic_app_ids: set[str] = set()
         self._diagnostic_stream_ids: set[str] = set()
         self._diagnostic_output_ids: set[str] = set()
         self._diagnostic_displays: dict[str, str | None] = {}
         self._manual_application_id: str | None = None
+
     def start_runtime(self) -> bool:
+        self._refresh_displays()
         try:
             self.runtime.start()
         except RuntimeError as exc:
@@ -223,6 +290,7 @@ class MainWindow(QMainWindow):
         self.enabled_checkbox.setChecked(enabled)
 
     def _snapshot_changed(self, entries, outputs) -> None:
+        self.settings_dialog.set_outputs(tuple(outputs))
         registry = getattr(self.runtime, "registry", None)
         self.automatic_routing_service.controller.update_snapshot(
             tuple(entries), tuple(outputs), tuple(getattr(registry, "unmatched_streams", ()))
@@ -544,6 +612,89 @@ class MainWindow(QMainWindow):
     def show_diagnostics(self) -> None:
         self.diagnostics_dialog.show_and_refresh()
 
+    def show_settings(self) -> None:
+        self.settings_dialog.set_outputs(tuple(self.view_model.outputs))
+        self.settings_dialog.show_and_refresh()
+
+    def _refresh_displays(self) -> None:
+        result = self.display_context.refresh()
+        self._display_refreshed(result)
+        self.model.refresh()
+
+    def _display_refreshed(self, result) -> None:
+        if result.error:
+            self.diagnostic_history.add(
+                DiagnosticCategory.RUNTIME,
+                f"Display discovery unavailable: {result.error}",
+                severity=DiagnosticSeverity.WARNING,
+            )
+        elif result.changed:
+            self.diagnostic_history.add(
+                DiagnosticCategory.RUNTIME,
+                f"Display snapshot refreshed: {len(result.displays)} connected",
+            )
+
+    def _mapping_result(self, result) -> None:
+        success = result.status in {
+            MappingOperationStatus.APPLIED,
+            MappingOperationStatus.NO_CHANGE,
+        }
+        self.diagnostic_history.add(
+            DiagnosticCategory.CONFIG,
+            f"Display mapping {result.status.value}",
+            severity=DiagnosticSeverity.INFO if success else DiagnosticSeverity.ERROR,
+            details=(
+                f"display={result.display_id} connector={result.connector or 'disconnected'} "
+                f"old={result.old_output_id or 'none'} new={result.new_output_id or 'none'}"
+            ),
+        )
+        if result.status is MappingOperationStatus.APPLIED:
+            targeted = self.automatic_routing_service.controller.reevaluate_display(
+                result.connector
+            )
+            self._record_targeted_reevaluation(targeted)
+        self.model.refresh()
+
+    def _migration_result(self, result) -> None:
+        success = result.status is MigrationStatus.MIGRATED
+        self.diagnostic_history.add(
+            DiagnosticCategory.CONFIG,
+            f"Display mapping migration {result.status.value}",
+            severity=DiagnosticSeverity.INFO if success else DiagnosticSeverity.WARNING,
+            details=(
+                f"source={result.source_display_id} target={result.target_display_id or 'none'}"
+            ),
+        )
+        if success:
+            target = next(
+                (
+                    item
+                    for item in self.display_context.displays
+                    if item.stable_id == result.target_display_id
+                ),
+                None,
+            )
+            targeted = self.automatic_routing_service.controller.reevaluate_display(
+                target.connector if target else None
+            )
+            self._record_targeted_reevaluation(targeted)
+        self.model.refresh()
+
+    def _record_targeted_reevaluation(self, result) -> None:
+        requested = ",".join(result.requested) or "none"
+        skipped = ",".join(result.skipped) or "none"
+        self.diagnostic_history.add(
+            DiagnosticCategory.ROUTING,
+            (
+                "Targeted AUTO reevaluation requested"
+                if result.requested
+                else "Targeted AUTO reevaluation skipped"
+            ),
+            details=(
+                f"connector={result.connector or 'none'} requested={requested} skipped={skipped}"
+            ),
+        )
+
     def _diagnostic_snapshot(self):
         registry = getattr(self.runtime, "registry", None)
         unmatched = tuple(getattr(registry, "unmatched_streams", ()))
@@ -555,6 +706,15 @@ class MainWindow(QMainWindow):
         started = bool(getattr(self.runtime, "_started", True))
         audio_error = getattr(self.runtime, "audio_error", None)
         kwin_error = getattr(self.runtime, "kwin_error", None)
+        display_rows = self.display_context.service.rows(
+            self.display_context.displays, tuple(self.view_model.outputs)
+        )
+        migration_statuses = {
+            mapping.display.id: self.display_context.service.preview_migration(
+                mapping.display.id, self.display_context.displays
+            ).status.value
+            for mapping in self.view_model.config.display_mappings
+        }
         return build_diagnostic_snapshot(
             self.view_model.config,
             self.view_model.entries,
@@ -567,6 +727,14 @@ class MainWindow(QMainWindow):
             kwin_health=f"Error: {kwin_error}" if kwin_error else "Connected",
             dbus_health="Owned" if started else "Not owned",
             autostart_health=self.autostart_manager.status().state.value.title(),
+            display_rows=display_rows,
+            display_discovery_health=(
+                f"Error: {self.display_context.error}"
+                if self.display_context.error
+                else "Available"
+            ),
+            resolved_display_mappings=self.display_context.routing_mappings(),
+            migration_statuses=migration_statuses,
         )
 
     def _record_snapshot_events(self, entries, outputs) -> None:

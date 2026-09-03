@@ -12,7 +12,9 @@ class AutomaticRoutingService(QObject):
     event_received = Signal(object)
     refresh_requested = Signal()
 
-    def __init__(self, config: AppConfig, backend, execution_lock, parent=None) -> None:
+    def __init__(
+        self, config: AppConfig, backend, execution_lock, parent=None, display_mappings=None
+    ) -> None:
         super().__init__(parent)
         self.controller = AutomaticRoutingController.from_backend(
             config,
@@ -20,6 +22,7 @@ class AutomaticRoutingService(QObject):
             execution_lock,
             event_sink=self.event_received.emit,
             refresh_requested=self.refresh_requested.emit,
+            display_mappings=display_mappings,
         )
 
     def stop(self) -> None:
